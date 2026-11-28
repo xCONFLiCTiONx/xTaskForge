@@ -924,6 +924,17 @@ public partial class MainWindow : Window
             {
                 it.Visible = EvaluateCondition(d.VisibleWhen);
                 it.Text = IsToggled(d) && !string.IsNullOrWhiteSpace(d.ToggledTitle) ? d.ToggledTitle : d.Title;
+
+                // PiP click-through is runtime state, not a persisted menu preference.
+                // Refresh the checkmark from the provider whenever the menu opens.
+                if (it is ToolStripMenuItem pipMenuItem &&
+                    (d.Command.Equals("native:pip_clickthrough", StringComparison.OrdinalIgnoreCase) ||
+                     d.Command.Equals("native:pip_toggle", StringComparison.OrdinalIgnoreCase) ||
+                     d.Command.Equals("pip.clickthrough", StringComparison.OrdinalIgnoreCase) ||
+                     d.Command.Equals("pip.toggle", StringComparison.OrdinalIgnoreCase)))
+                {
+                    pipMenuItem.Checked = PipProvider.IsTrackingActive;
+                }
             }
             if (it is ToolStripMenuItem m && m.HasDropDownItems)
                 RefreshDynamicMenuItems(m.DropDownItems);
@@ -992,6 +1003,16 @@ public partial class MainWindow : Window
                         string adminBadge = captured.SilentElevate ? " [Silent Elevated]" : (captured.RunAsAdmin ? " [Elevated]" : "");
                         Log($"[Tray Menu] Clicked '{effectiveTitle}'{adminBadge} -> {runCmd} {runArgs}");
                         ExecuteCommand(runCmd, runArgs, captured.WorkingDirectory, captured.RunHidden, captured.RunAsAdmin, captured.SilentElevate, $"tray_{captured.Id}");
+
+                        // Update this live menu item in place; never replace the
+                        // ContextMenuStrip from inside its own Click event.
+                        if (captured.Command.Equals("native:pip_clickthrough", StringComparison.OrdinalIgnoreCase) ||
+                            captured.Command.Equals("native:pip_toggle", StringComparison.OrdinalIgnoreCase) ||
+                            captured.Command.Equals("pip.clickthrough", StringComparison.OrdinalIgnoreCase) ||
+                            captured.Command.Equals("pip.toggle", StringComparison.OrdinalIgnoreCase))
+                        {
+                            menuItem.Checked = PipProvider.IsTrackingActive;
+                        }
                     }
                 });
             };
@@ -2460,9 +2481,11 @@ public partial class MainWindow : Window
                                ?? _trayConfig.Items.FirstOrDefault(i => i.Command == "native:pip_clickthrough" || i.Command == "pip_clickthrough");
                     if (pipItem != null)
                     {
+                        // Persist the model state, but do not rebuild the tray menu
+                        // while its click handler is executing. The open menu owns
+                        // the active ToolStripItem instances until it closes naturally.
                         pipItem.Checked = PipProvider.IsTrackingActive;
                         SaveTrayMenuJson();
-                        RebuildTrayContextMenu();
                     }
 
                     Log($"[PiP] {msg}");
